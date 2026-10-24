@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>module 自检</title></head>
+<body>
+<pre id="out">检查中…</pre>
+<script type="module">
+const out = document.getElementById('out');
+const worker = new Worker('./modtest-worker.js', { type: 'module' });
+worker.addEventListener('message', event => {
+    out.textContent = `OK\n${event.data}`;
+    document.body.dataset.done = '1';
+});
+worker.addEventListener('error', event => {
+    out.textContent = `ERROR ${event.message}`;
+    document.body.dataset.done = 'error';
+});
+</script>
+</body>
+</html>

@@ -6,10 +6,11 @@ import { CONFIG } from './core/config.js';
 import { initSettings, settings } from './core/settings.js';
 import { storage } from './core/storage.js';
 import { initSetup, showScreen, setPreview, setBusy, showStatus, hideStatus, setEnv, setRecognizeEnabled } from './ui/setup.js';
-import { initBoard, startBoard, exitBoard } from './ui/boardView.js';
+import { initBoard, startBoard, exitBoard, getLineCount, getPublicLines, applyVoiceCommand } from './ui/boardView.js';
 import { initToast, toast } from './ui/toast.js';
 import { recognize, prepareImage, isHeic, warmUp, setHandlers as setOcrHandlers } from './ocr/client.js';
-import { initVoice, voiceAvailable, startListening, stopListening, applyCommand } from './voice/voice.js';
+import { initVoice, voiceAvailable, startListening, stopListening } from './voice/voice.js';
+import { describe, EXAMPLES } from './voice/commands.js';
 
 const state = {
     file: null,
@@ -308,10 +309,16 @@ function boot() {
     });
 
     initVoice({
-        getLines: () => document.getElementById('lines')?.children.length || 0,
-        onAction: handleVoiceAction,
+        getLineCount,
+        onCommand: handleCommand,
+        onUnknown: handleVoiceUnknown,
         onTranscript: text => showCaption(text),
-        onError: message => toast(message)
+        onState: (state, caption) => {
+            const button = document.getElementById('btn-voice');
+            if (button) button.dataset.state = state;
+            showCaption(state === 'listening' ? '正在听…' : caption || '');
+        },
+        onError: message => toast(message, { timeout: 6000 })
     });
 
     document.getElementById('btn-camera-cancel')?.addEventListener('click', closeCamera);
@@ -358,7 +365,10 @@ function boot() {
     if (new URLSearchParams(location.search).has('sample')) loadSample();
 }
 
-/* ---------- 语音（第二阶段） ---------- */
+/* ---------- 语音 ---------- */
+
+const EDIT_OPS = ['setChar', 'setLine', 'delete', 'append'];
+let confirmResolver = null;
 
 function showCaption(text) {
     const caption = document.getElementById('voice-caption');
@@ -372,6 +382,65 @@ function showCaption(text) {
     node.textContent = text;
 }
 
+function askConfirm(message) {
+    return new Promise(resolve => {
+        const dialog = document.getElementById('dlg-voice');
+        const preview = document.getElementById('voice-preview');
+        const ok = document.getElementById('btn-voice-ok');
+        const cancel = document.getElementById('btn-voice-cancel');
+        preview.textContent = message;
+
+        const finish = value => {
+            confirmResolver = null;
+            ok.removeEventListener('click', onOk);
+            cancel.removeEventListener('click', onCancel);
+            if (dialog.open) dialog.close();
+            resolve(value);
+        };
+        const onOk = () => finish(true);
+        const onCancel = () => finish(false);
+
+        ok.addEventListener('click', onOk);
+        cancel.addEventListener('click', onCancel);
+        confirmResolver = finish;
+        dialog.showModal();
+    });
+}
+
+async function handleCommand(command) {
+    /* 弹窗开着的时候，“确认 / 取消”直接用嘴说也行 */
+    if (confirmResolver && (command.op === 'confirm' || command.op === 'cancel')) {
+        confirmResolver(command.op === 'confirm');
+        return;
+    }
+    if (command.op === 'confirm' || command.op === 'cancel') return;
+
+    showCaption('');
+
+    if (EDIT_OPS.includes(command.op)) {
+        const lines = getPublicLines();
+        const message = describe(command, lines);
+        /* 改稿前先停，确认后从当前行继续 */
+        applyVoiceCommand({ op: 'pause' });
+        const ok = await askConfirm(`${message}\n\n要说「确认」或「取消」。`);
+        if (!ok) {
+            toast('已取消');
+            return;
+        }
+        const result = await applyVoiceCommand(command);
+        if (!result.ok) {
+            toast(result.message);
+            return;
+        }
+        if (result.tex) storage.set(CONFIG.LS.doc, wrapTex(result.tex));
+        toast('已修改，从当前行继续');
+        return;
+    }
+
+    const result = await applyVoiceCommand(command);
+    if (!result.ok) toast(result.message);
+}
+
 function handleVoiceStart(button) {
     button.dataset.state = 'listening';
     showCaption('正在听…');
@@ -382,11 +451,13 @@ function handleVoiceEnd() {
     const button = document.getElementById('btn-voice');
     if (button) button.dataset.state = 'idle';
     stopListening();
-    showCaption('');
 }
 
-function handleVoiceAction(action) {
-    applyCommand(action);
+function handleVoiceUnknown(raw) {
+    const controls = document.getElementById('controls');
+    if (controls) controls.dataset.idle = 'false';
+    const sample = EXAMPLES.slice(0, 3).join(' · ');
+    toast(`没听懂「${raw || '空'}」。可以说：${sample}`, { timeout: 8000 });
 }
 
 boot();

@@ -5,7 +5,7 @@
 
 import { CONFIG } from '../core/config.js';
 import { settings } from '../core/settings.js';
-import { buildLines, splitLineSecondary, hardSplitLine, lineText } from '../core/split.js';
+import { buildLines, splitLineSecondary, hardSplitLine, lineText, serializeLines } from '../core/split.js';
 import { fitFontSize, lineHeightOf, applyFont } from '../core/layout.js';
 import { renderMathInto } from '../latex/render.js';
 import { formatSpeed, formatDuration } from '../core/format.js';
@@ -169,7 +169,7 @@ export function setVoiceState(state, caption = '') {
     ui.voiceText.textContent = caption;
 }
 
-export async function startBoard(tex) {
+export async function startBoard(tex, { startIndex = 0, autoplay = true } = {}) {
     showScreen('board');
     lines = buildLines(tex);
 
@@ -193,15 +193,16 @@ export async function startBoard(tex) {
         mathSeconds: settings.get('mathSeconds')
     });
 
-    applyScroll(0);
+    board.index = Math.max(0, Math.min(startIndex, lines.length - 1));
+    applyScroll(board.index);
     bumpControls();
-    board.start();
+    if (autoplay) board.start();
     updateLabels({
-        index: 0,
+        index: board.index,
         total: lines.length,
         progress: 0,
         remainingMs: board.totalRemainingMs(),
-        paused: false
+        paused: !autoplay
     });
 }
 
@@ -213,6 +214,14 @@ export function exitBoard() {
 }
 
 /* ---------- 供语音层调用 ---------- */
+
+export function getLineCount() {
+    return lines.length;
+}
+
+export function getPublicLines() {
+    return lines.map(line => ({ ...line, text: lineText(line) }));
+}
 
 export function voicePause() {
     if (board) board.pause();
@@ -234,9 +243,81 @@ export function currentLines() {
     return lines;
 }
 
-export function replaceLines(nextTex) {
-    board.stop();
-    startBoard(nextTex);
+/**
+ * 把语音指令落到文档上。
+ * 编辑类会重排并保持当前位置；遥控类直接作用于 Board。
+ * 返回 { ok, message, tex? }
+ */
+export async function applyVoiceCommand(command) {
+    if (!board || !lines.length) return { ok: false, message: '还没有内容' };
+
+    const wasPlaying = !board.paused;
+    const index = board.index;
+
+    if (command.op === 'pause') {
+        board.pause();
+        return { ok: true, message: '已暂停' };
+    }
+    if (command.op === 'resume') {
+        board.start();
+        return { ok: true, message: '继续' };
+    }
+    if (command.op === 'next') {
+        board.next();
+        return { ok: true, message: '下一行' };
+    }
+    if (command.op === 'prev') {
+        board.prev();
+        return { ok: true, message: '上一行' };
+    }
+    if (command.op === 'faster' || command.op === 'slower') {
+        const delta = command.op === 'faster' ? 0.05 : -0.05;
+        settings.set('speed', settings.get('speed') + delta);
+        return { ok: true, message: formatSpeed(settings.get('speed')) };
+    }
+
+    const next = lines.map(line => ({
+        ...line,
+        parts: line.parts.map(part => ({ ...part }))
+    }));
+
+    const lineIndexOf = () => {
+        if (Number.isFinite(command.line) && command.line >= 1 && command.line <= next.length) {
+            return command.line - 1;
+        }
+        return index;
+    };
+
+    if (command.op === 'setChar') {
+        const target = next[lineIndexOf()];
+        if (!target) return { ok: false, message: '找不到这一行' };
+        let replaced = false;
+        for (const part of target.parts) {
+            if (part.type !== 'text' || replaced) continue;
+            if (part.value.includes(command.from)) {
+                part.value = part.value.replace(command.from, command.to);
+                replaced = true;
+            }
+        }
+        if (!replaced) return { ok: false, message: `这一行没有「${command.from}」` };
+    } else if (command.op === 'setLine') {
+        const target = next[lineIndexOf()];
+        if (!target) return { ok: false, message: '找不到这一行' };
+        target.kind = 'text';
+        target.parts = [{ type: 'text', value: command.text }];
+    } else if (command.op === 'delete') {
+        const targetIndex = lineIndexOf();
+        if (next.length <= 1) return { ok: false, message: '只剩一行了，删不了' };
+        next.splice(targetIndex, 1);
+    } else if (command.op === 'append') {
+        next.splice(index + 1, 0, { kind: 'text', parts: [{ type: 'text', value: command.text }] });
+    } else {
+        return { ok: false, message: '这条指令还不支持' };
+    }
+
+    const tex = serializeLines(next);
+    await startBoard(tex, { startIndex: Math.min(index, next.length - 1), autoplay: wasPlaying });
+    return { ok: true, message: '已修改', tex };
 }
 
 export { applyFont, lineHeightOf };

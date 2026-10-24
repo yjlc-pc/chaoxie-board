@@ -28,7 +28,7 @@ function configure(base) {
     env.allowLocalModels = false;
     env.allowRemoteModels = true;
     /* 国内直连 huggingface.co 不可靠，统一走 mirror */
-    env.remoteHost = 'https://hf-mirror.com';
+    env.remoteHost = 'https://hf-mirror.com/';
     env.remotePathTemplate = '{model}/resolve/{revision}/';
     /* 离线可用：权重进 Cache Storage */
     env.useBrowserCache = true;

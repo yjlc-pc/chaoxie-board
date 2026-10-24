@@ -109,3 +109,17 @@ export function lineText(line) {
         .replace(/\s+/g, ' ')
         .trim();
 }
+
+/** lines[] → .tex（语音改完回写，.tex 始终是真相源） */
+export function serializeLines(lines) {
+    return lines
+        .map(line => {
+            if (line.kind === 'math') return `$$${line.src}$$`;
+            const body = line.parts
+                .map(part => (part.type === 'math' ? `$${part.src}$` : part.value))
+                .join('');
+            if (line.kind === 'heading') return `\\section*{${body}}`;
+            return body;
+        })
+        .join('\n');
+}

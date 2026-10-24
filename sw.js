@@ -29,6 +29,8 @@ const SHELL = [
     'src/ui/boardView.js',
     'src/ui/toast.js',
     'src/voice/voice.js',
+    'src/voice/worker.js',
+    'src/voice/commands.js',
     'data/strokes.json',
     'pwa/icon.svg',
     'pwa/icon-192.png',
