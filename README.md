@@ -65,6 +65,25 @@ chaoxie-board/
 
 量化档默认 `q4f16`；如果设备没有 `shader-f16` 或初始化失败，自动降到 `q4` 重试。
 
+### 为什么 vendor 目录里有被改过的文件
+
+`transformers.web.min.js` 原本按打包工具的方式 `import "onnxruntime-web/webgpu"` 和 `"onnxruntime-common"`，浏览器里解析不了。这两处已改成相对路径：
+
+- `onnxruntime-web/webgpu` → `./ort.webgpu.mjs`（ORT 1.31 WebGPU bundle）
+- `onnxruntime-common` → `./ort-common/index.js`（ONNX Runtime 公共 API 的 ESM 构建）
+
+所以本项目零构建、零 CDN 也能跑。升级 transformers.js 时需要重复这两处替换。
+
+### 开发自检
+
+```bash
+# 一个带调试端口的浏览器
+chromium --headless=new --remote-debugging-port=9222 --user-data-dir=.chrome-profile about:blank &
+node tools/cdp-check.mjs 'http://127.0.0.1:8770/?sample=1'     # 打印 booted/行数/字号/控制台错误
+node tools/cdp-check.mjs 'http://127.0.0.1:8770/tools/modtest.html'  # 验证 vendor 依赖能在 Worker 里解析
+```
+
+
 ## 已知限制
 
 - **多栏排版会被按视觉横排拼错顺序**（GLM-OCR 的已知问题），识别结果只能靠重新拍或语音改。
