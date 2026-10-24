@@ -57,13 +57,19 @@ chaoxie-board/
 
 | 用途 | 来源 | 体积 |
 |---|---|---|
-| OCR | `onnx-community/GLM-OCR-ONNX`（MIT，0.9B） | q4f16 约 621 MB |
-| 权重下载 | `https://hf-mirror.com`（`env.remoteHost`） | 首次识别时下载，进 Cache Storage |
+| OCR | `onnx-community/GLM-OCR-ONNX`（MIT，0.9B） | q4f16 约 650 MB |
+| 权重下载 | **ModelScope 魔搭**（主）→ hf-mirror（备），见 `src/core/modelSource.js` | 首次识别时下载，进 Cache Storage |
 | 运行时 | transformers.js 4.3.1 + onnxruntime-web 1.31（已 vendor 进仓库） | 42 MB |
 | 公式 | KaTeX 0.16.47（已 vendor） | 1.5 MB |
 | 字体 | 系统字体（楷体优先），不拉 webfont | 0 |
 
 量化档默认 `q4f16`；如果设备没有 `shader-f16` 或初始化失败，自动降到 `q4` 重试。
+
+### 权重来源为什么是 ModelScope
+
+实测（2026-10）：`hf-mirror.com` 主站 TCP 连不上，只有 `cdn-lfs-*.hf-mirror.com` 子域能过；`huggingface.co` 的 DNS 被污染。`modelscope.cn` 三个仓库都有、CORS 是 `*`、LFS 走国内 CDN，所以主源是魔搭，hf-mirror 只做备用（`src/core/modelSource.js` 里按顺序尝试）。
+
+魔搭与 HF 的仓库布局一致，只是默认分支叫 `master` 而不是 `main`，所以模板写死 `models/{model}/resolve/master/`。
 
 ### 为什么 vendor 目录里有被改过的文件
 

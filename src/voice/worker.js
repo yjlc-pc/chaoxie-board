@@ -9,6 +9,7 @@ import {
     AutoModelForCausalLM,
     env
 } from '../../vendor/transformers/transformers.web.min.js';
+import { MODEL_SOURCES, applyModelSource } from '../core/modelSource.js';
 
 const ASR_MODEL = 'onnx-community/whisper-tiny';
 const PARSE_MODEL = 'onnx-community/functiongemma-270m-it-ONNX';
@@ -21,11 +22,27 @@ let base = '';
 function configure() {
     env.allowLocalModels = false;
     env.allowRemoteModels = true;
-    env.remoteHost = 'https://hf-mirror.com/';
-    env.remotePathTemplate = '{model}/resolve/{revision}/';
     env.useBrowserCache = true;
     env.backends.onnx.wasm.wasmPaths = new URL('vendor/transformers/', base).href;
     env.backends.onnx.wasm.numThreads = 1;
+}
+
+/** 依次尝试各权重来源 */
+async function withSource(label, loader) {
+    let lastError = null;
+    for (const source of MODEL_SOURCES) {
+        applyModelSource(env, source);
+        try {
+            return await loader(source);
+        } catch (error) {
+            lastError = error;
+            self.postMessage({
+                type: 'status',
+                message: `${label}：${source.label} 不可用（${error.message || error}），换下一个源…`
+            });
+        }
+    }
+    throw lastError || new Error(`${label} 加载失败`);
 }
 
 function progress(file) {
@@ -39,11 +56,13 @@ function progress(file) {
 async function loadAsr(device) {
     if (transcriber) return transcriber;
     self.postMessage({ type: 'status', message: '加载语音模型（Whisper tiny）…' });
-    transcriber = await pipeline('automatic-speech-recognition', ASR_MODEL, {
-        device,
-        dtype: device === 'webgpu' ? 'q4f16' : 'q8',
-        progress_callback: progress('whisper')
-    });
+    transcriber = await withSource('Whisper', () =>
+        pipeline('automatic-speech-recognition', ASR_MODEL, {
+            device,
+            dtype: device === 'webgpu' ? 'q4f16' : 'q8',
+            progress_callback: progress('whisper')
+        })
+    );
     return transcriber;
 }
 
@@ -74,16 +93,19 @@ async function loadParser(device) {
     if (parserLoading) return parserLoading;
     parserLoading = (async () => {
         self.postMessage({ type: 'status', message: '加载指令解析模型（FunctionGemma）…' });
-        const tokenizer = await AutoTokenizer.from_pretrained(PARSE_MODEL, {
-            progress_callback: progress('functiongemma')
+        return await withSource('FunctionGemma', async () => {
+            const tokenizer = await AutoTokenizer.from_pretrained(PARSE_MODEL, {
+                progress_callback: progress('functiongemma')
+            });
+            const model = await AutoModelForCausalLM.from_pretrained(PARSE_MODEL, {
+                device,
+                dtype: device === 'webgpu' ? 'q4f16' : 'q8',
+                progress_callback: progress('functiongemma')
+            });
+            const result = { tokenizer, model };
+            parser = result;
+            return result;
         });
-        const model = await AutoModelForCausalLM.from_pretrained(PARSE_MODEL, {
-            device,
-            dtype: device === 'webgpu' ? 'q4f16' : 'q8',
-            progress_callback: progress('functiongemma')
-        });
-        parser = { tokenizer, model };
-        return parser;
     })();
     try {
         return await parserLoading;

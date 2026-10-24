@@ -20,6 +20,7 @@ const SHELL = [
     'src/core/split.js',
     'src/core/layout.js',
     'src/core/strokes.js',
+    'src/core/modelSource.js',
     'src/latex/parse.js',
     'src/latex/render.js',
     'src/board/Board.js',

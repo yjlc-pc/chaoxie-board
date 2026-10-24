@@ -17,6 +17,7 @@ import {
     RawImage,
     env
 } from '../../vendor/transformers/transformers.web.min.js';
+import { MODEL_SOURCES, applyModelSource } from '../core/modelSource.js';
 
 let model = null;
 let processor = null;
@@ -27,13 +28,10 @@ let initializing = null;
 function configure(base) {
     env.allowLocalModels = false;
     env.allowRemoteModels = true;
-    /* 国内直连 huggingface.co 不可靠，统一走 mirror */
-    env.remoteHost = 'https://hf-mirror.com/';
-    env.remotePathTemplate = '{model}/resolve/{revision}/';
-    /* 离线可用：权重进 Cache Storage */
     env.useBrowserCache = true;
     env.backends.onnx.wasm.wasmPaths = new URL('vendor/transformers/', base).href;
     env.backends.onnx.wasm.numThreads = 1;
+    /* remoteHost / remotePathTemplate 由 chooseSource 按源设置 */
 }
 
 async function detectWebGPU() {
@@ -83,31 +81,39 @@ async function init({ base, dtypes, modelId }) {
         if (!ordered.length) ordered.push('q4');
 
         let lastError = null;
-        for (const dtype of ordered) {
-            try {
-                self.postMessage({ type: 'status', message: `正在加载模型（${dtype}）…`, dtype });
-                processor = await AutoProcessor.from_pretrained(modelId, {
-                    progress_callback: progressCallback
-                });
-                model = await AutoModelForImageTextToText.from_pretrained(modelId, {
-                    dtype,
-                    device: backend,
-                    progress_callback: progressCallback
-                });
-                readyDtype = dtype;
-                self.postMessage({ type: 'ready', dtype, backend });
-                return { dtype, backend };
-            } catch (error) {
-                lastError = error;
-                console.warn(`dtype ${dtype} 初始化失败，尝试下一档`, error);
-                self.postMessage({
-                    type: 'status',
-                    message: `${dtype} 不可用（${error.message || error}），自动降档…`,
-                    dtype
-                });
+        /* 源 × 量化档：魔搭为主，hf-mirror 备用 */
+        for (const source of MODEL_SOURCES) {
+            applyModelSource(env, source);
+            for (const dtype of ordered) {
+                try {
+                    self.postMessage({
+                        type: 'status',
+                        message: `从 ${source.label} 加载模型（${dtype}）…`,
+                        dtype
+                    });
+                    processor = await AutoProcessor.from_pretrained(modelId, {
+                        progress_callback: progressCallback
+                    });
+                    model = await AutoModelForImageTextToText.from_pretrained(modelId, {
+                        dtype,
+                        device: backend,
+                        progress_callback: progressCallback
+                    });
+                    readyDtype = dtype;
+                    self.postMessage({ type: 'ready', dtype, backend, source: source.id });
+                    return { dtype, backend, source: source.id };
+                } catch (error) {
+                    lastError = error;
+                    console.warn(`${source.id} / ${dtype} 初始化失败`, error);
+                    self.postMessage({
+                        type: 'status',
+                        message: `${source.label} 的 ${dtype} 不可用（${error.message || error}），换下一个…`,
+                        dtype
+                    });
+                }
             }
         }
-        throw lastError || new Error('模型初始化失败');
+        throw lastError || new Error('模型初始化失败：所有来源都不可用');
     })();
 
     try {
