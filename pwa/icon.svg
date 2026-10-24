@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="抄写大屏">
+  <rect width="512" height="512" rx="112" fill="#17130b"/>
+  <rect x="56" y="56" width="400" height="400" rx="72" fill="#1f1b13" stroke="#e7c26c" stroke-width="12"/>
+  <g fill="#e7c26c">
+    <rect x="112" y="170" width="288" height="18" rx="9"/>
+    <rect x="112" y="247" width="288" height="18" rx="9"/>
+    <rect x="112" y="324" width="180" height="18" rx="9"/>
+  </g>
+  <circle cx="392" cy="392" r="54" fill="#e7c26c"/>
+  <path d="M372 392h40M392 372v40" stroke="#3f2e00" stroke-width="12" stroke-linecap="round"/>
+</svg>

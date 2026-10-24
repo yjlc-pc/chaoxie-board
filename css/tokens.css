@@ -1,0 +1,174 @@
+/* ============================================================
+   tokens.css —— Material Design 3 设计令牌
+   配色：种子 #C8A44D 经 Material Color Utilities
+   SchemeTonalSpot 生成的完整 light / dark 角色。
+   生成脚本见 tools/palette.mjs，禁止单点手调 hex。
+
+   间距只用 4 / 8 / 12 / 16 / 24 / 32 / 48；
+   圆角只取 4 / 8 / 12 / 16 / 28 / full；
+   阴影只取 1 / 3 / 6dp 三档。
+   ============================================================ */
+
+:root,
+body.light {
+    color-scheme: light;
+
+    --primary: #765a0b;
+    --on-primary: #ffffff;
+    --primary-container: #ffdf99;
+    --on-primary-container: #5a4300;
+
+    --secondary: #6a5d3f;
+    --on-secondary: #ffffff;
+    --secondary-container: #f4e0bb;
+    --on-secondary-container: #52452a;
+
+    --tertiary: #496548;
+    --on-tertiary: #ffffff;
+    --tertiary-container: #cbebc6;
+    --on-tertiary-container: #324d32;
+
+    --error: #ba1a1a;
+    --on-error: #ffffff;
+    --error-container: #ffdad6;
+    --on-error-container: #93000a;
+
+    --background: #fff8f2;
+    --on-background: #1f1b13;
+    --surface: #fff8f2;
+    --on-surface: #1f1b13;
+    --surface-variant: #ece1cf;
+    --on-surface-variant: #4d4639;
+    --on-surface-container: #1f1b13;
+
+    --outline: #7e7667;
+    --outline-variant: #d0c5b4;
+
+    --shadow: #000000;
+    --scrim: #000000;
+    --inverse-surface: #353027;
+    --inverse-on-surface: #f9efe2;
+    --inverse-primary: #e7c26c;
+
+    --surface-dim: #e2d9cc;
+    --surface-bright: #fff8f2;
+    --surface-container-lowest: #ffffff;
+    --surface-container-low: #fcf2e5;
+    --surface-container: #f6eddf;
+    --surface-container-high: #f0e7d9;
+    --surface-container-highest: #ebe1d4;
+}
+
+body.dark {
+    color-scheme: dark;
+
+    --primary: #e7c26c;
+    --on-primary: #3f2e00;
+    --primary-container: #5a4300;
+    --on-primary-container: #ffdf99;
+
+    --secondary: #d7c5a0;
+    --on-secondary: #3a2f15;
+    --secondary-container: #52452a;
+    --on-secondary-container: #f4e0bb;
+
+    --tertiary: #afcfab;
+    --on-tertiary: #1c361d;
+    --tertiary-container: #324d32;
+    --on-tertiary-container: #cbebc6;
+
+    --error: #ffb4ab;
+    --on-error: #690005;
+    --error-container: #93000a;
+    --on-error-container: #ffdad6;
+
+    --background: #17130b;
+    --on-background: #ebe1d4;
+    --surface: #17130b;
+    --on-surface: #ebe1d4;
+    --surface-variant: #4d4639;
+    --on-surface-variant: #d0c5b4;
+    --on-surface-container: #ebe1d4;
+
+    --outline: #999080;
+    --outline-variant: #4d4639;
+
+    --shadow: #000000;
+    --scrim: #000000;
+    --inverse-surface: #ebe1d4;
+    --inverse-on-surface: #353027;
+    --inverse-primary: #765a0b;
+
+    --surface-dim: #17130b;
+    --surface-bright: #3e392f;
+    --surface-container-lowest: #110e07;
+    --surface-container-low: #1f1b13;
+    --surface-container: #231f17;
+    --surface-container-high: #2e2921;
+    --surface-container-highest: #39342b;
+}
+
+:root {
+    /* ---------- 间距：4dp 网格 ---------- */
+    --space-1: 0.25rem;   /* 4  */
+    --space-2: 0.5rem;    /* 8  */
+    --space-3: 0.75rem;   /* 12 */
+    --space-4: 1rem;      /* 16 */
+    --space-6: 1.5rem;    /* 24 */
+    --space-8: 2rem;      /* 32 */
+    --space-12: 3rem;     /* 48 */
+
+    /* ---------- 形状刻度 ---------- */
+    --radius-xs: 0.25rem;   /* 4  */
+    --radius-sm: 0.5rem;    /* 8  */
+    --radius-md: 0.75rem;   /* 12 */
+    --radius-lg: 1rem;      /* 16 */
+    --radius-xl: 1.75rem;   /* 28 */
+    --radius-full: 9999px;
+
+    /* ---------- 海拔：只有 1 / 3 / 6dp ---------- */
+    --elev-1: 0 1px 2px color-mix(in srgb, var(--shadow) 24%, transparent);
+    --elev-3: 0 3px 8px color-mix(in srgb, var(--shadow) 32%, transparent);
+    --elev-6: 0 6px 16px color-mix(in srgb, var(--shadow) 40%, transparent);
+
+    /* ---------- state layer ---------- */
+    --state-hover: color-mix(in srgb, var(--on-surface) 8%, transparent);
+    --state-focus: color-mix(in srgb, var(--on-surface) 10%, transparent);
+    --state-pressed: color-mix(in srgb, var(--on-surface) 10%, transparent);
+
+    /* ---------- 字体 ---------- */
+    --font-serif: "LXGW WenKai GB", "KaiTi", "STKaiti", "Noto Serif SC", serif;
+    --font-sans: "LXGW WenKai GB", "KaiTi", "STKaiti", "Noto Serif SC", system-ui, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+    --font-icon: "Material Symbols Outlined";
+
+    /* Beer CSS 读取的字体变量 */
+    --font: var(--font-serif);
+
+    /* ---------- MD3 type scale（中文行高略放宽） ---------- */
+    --type-display: 3.5rem;
+    --line-display: 4rem;
+    --type-headline: 1.75rem;
+    --line-headline: 2.25rem;
+    --type-title-lg: 1.375rem;
+    --line-title-lg: 1.75rem;
+    --type-title: 1rem;
+    --line-title: 1.5rem;
+    --type-title-sm: 0.875rem;
+    --line-title-sm: 1.25rem;
+    --type-body: 1rem;
+    --line-body: 1.5rem;
+    --type-body-sm: 0.875rem;
+    --line-body-sm: 1.25rem;
+    --type-label: 0.875rem;
+    --line-label: 1.25rem;
+    --type-label-sm: 0.75rem;
+    --line-label-sm: 1rem;
+
+    /* ---------- 派生语义 ---------- */
+    --grid-line: color-mix(in srgb, var(--error) 46%, transparent);
+    --grid-line-strong: color-mix(in srgb, var(--error) 72%, transparent);
+    --scrim-50: color-mix(in srgb, var(--scrim) 50%, transparent);
+    --surface-glass: color-mix(in srgb, var(--surface) 86%, transparent);
+    --card-outline: var(--outline-variant);
+}

@@ -1,0 +1,10 @@
+{
+  "name": "chaoxie-board",
+  "version": "0.1.0",
+  "private": true,
+  "description": "图片 → GLM-OCR（本地 WebGPU）→ .tex → 大屏按笔画节奏滚动抄写",
+  "type": "module",
+  "scripts": {
+    "start": "./start.sh"
+  }
+}

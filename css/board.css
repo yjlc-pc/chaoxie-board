@@ -1,0 +1,175 @@
+/* ============================================================
+   board.css —— 大屏、滚动、控制条、语音
+   ============================================================ */
+
+.board {
+    position: fixed;
+    inset: 0;
+    background: var(--background);
+    overflow: hidden;
+}
+
+.board-viewport {
+    position: absolute;
+    inset: 8vh 6vw 16vh;
+    overflow: hidden;
+}
+
+.board-lines {
+    --line-font: 96px;
+    display: flex;
+    flex-direction: column;
+    transform: translate3d(0, 0, 0);
+    transition: transform var(--scroll-ms, 620ms) cubic-bezier(0.22, 0.61, 0.36, 1);
+    will-change: transform;
+}
+
+.line {
+    font-family: var(--font-serif);
+    font-size: var(--line-font);
+    line-height: 1.9;
+    white-space: nowrap;
+    overflow: hidden;
+    color: var(--on-surface);
+    /* 行首留一点空气，避免贴边裁切 */
+    padding-inline: 0.08em;
+}
+
+.line--heading {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.line--math {
+    color: var(--on-surface);
+    text-align: center;
+    font-family: var(--font-serif);
+}
+.line--math .katex-display { display: inline-block; margin: 0; }
+.line--math .katex { font-size: 1em; }
+.math-fallback { font-family: var(--font-mono); color: var(--on-surface-variant); }
+
+/* 行内公式不改变行高节奏 */
+.line .katex { font-size: 1em; }
+
+/* ---------- 行进度 ---------- */
+.board-progress {
+    position: absolute;
+    left: 0; right: 0; bottom: calc(16vh - 12px);
+    height: 3px;
+    background: color-mix(in srgb, var(--outline-variant) 40%, transparent);
+}
+.board-progress > div {
+    height: 100%;
+    width: 0;
+    background: var(--primary);
+    transition: width 120ms linear;
+}
+
+/* ---------- 控制条 ---------- */
+.controls {
+    position: fixed;
+    left: 50%;
+    bottom: 3vh;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-full);
+    background: var(--surface-glass);
+    border: 1px solid var(--card-outline);
+    box-shadow: var(--elev-3);
+    backdrop-filter: blur(12px);
+    transition: opacity 400ms ease, transform 400ms ease;
+    z-index: 20;
+}
+.controls[data-idle="true"] {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+    pointer-events: none;
+}
+
+.ctrl {
+    display: grid;
+    place-items: center;
+    width: 3.5rem; height: 3.5rem;
+    border: none;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--on-surface);
+    font-size: 1.5rem;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+.ctrl:hover { background: var(--state-hover); }
+.ctrl--primary {
+    background: var(--primary);
+    color: var(--on-primary);
+    width: 4rem; height: 4rem;
+    font-size: 1.75rem;
+}
+.ctrl--primary:hover { background: color-mix(in srgb, var(--primary) 88%, var(--on-primary)); }
+
+.ctrl-divider { width: 1px; height: 2rem; background: var(--outline-variant); }
+.ctrl-label {
+    min-width: 7.5rem;
+    text-align: center;
+    font-size: var(--type-body-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--on-surface-variant);
+}
+.ctrl-label.meta { min-width: 9rem; }
+
+/* ---------- 语音 ---------- */
+.voice-fab {
+    position: fixed;
+    right: 3vw;
+    bottom: 3vh;
+    width: 5rem; height: 5rem;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: var(--radius-full);
+    background: var(--primary-container);
+    color: var(--on-primary-container);
+    font-size: 2rem;
+    box-shadow: var(--elev-6);
+    cursor: pointer;
+    touch-action: none;
+    z-index: 25;
+    transition: transform 120ms ease, background 160ms ease;
+}
+.voice-fab[data-state="listening"] {
+    background: var(--error);
+    color: var(--on-error);
+    transform: scale(1.08);
+}
+.voice-fab[hidden] { display: none; }
+
+.voice-caption {
+    position: fixed;
+    left: 50%;
+    bottom: 13vh;
+    transform: translateX(-50%);
+    max-width: min(1100px, 80vw);
+    padding: var(--space-3) var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--surface-container-high);
+    color: var(--on-surface);
+    box-shadow: var(--elev-3);
+    font-size: var(--type-title-lg);
+    line-height: var(--line-title-lg);
+    z-index: 24;
+}
+.voice-caption[hidden] { display: none; }
+
+.dialog .voice-preview {
+    margin-top: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+    background: var(--surface-container-high);
+    font-family: var(--font-mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
