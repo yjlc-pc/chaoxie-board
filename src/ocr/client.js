@@ -24,8 +24,23 @@ function ensureWorker() {
         console.error('OCR worker error', event);
         if (pending) pending.reject(new Error(event.message || 'Worker 崩溃'));
         pending = null;
+        resetWorker();
     });
     return worker;
+}
+
+/** 丢掉这个 Worker（卡死或崩掉时）：下次识别会重建，GPU 上下文也跟着释放 */
+function resetWorker() {
+    if (worker) {
+        try {
+            worker.terminate();
+        } catch (error) {
+            /* 已经死了就算了 */
+        }
+    }
+    worker = null;
+    ready = null;
+    pending = null;
 }
 
 let pending = null;
@@ -59,9 +74,10 @@ function handleMessage(data) {
         return;
     }
     if (data.type === 'error') {
-        if (pending && (!data.id || pending.id === data.id)) {
-            pending.reject(new Error(data.message));
-            pending = null;
+        const current = pending;
+        if (current && (!data.id || current.id === data.id)) {
+            resetWorker();
+            current.reject(new Error(data.message));
         }
     }
 }
@@ -127,12 +143,12 @@ export function isHeic(file) {
  * 解码 + 按最长边缩放 + 转 JPEG。
  * 手机竖拍依赖 EXIF 方向，必须在解码时应用。
  */
-export async function prepareImage(blob) {
+export async function prepareImage(blob, maxEdge = O.MAX_EDGE) {
     const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' }).catch(async () => {
         return await createImageBitmap(blob);
     });
 
-    const scale = Math.min(1, O.MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
 
@@ -175,7 +191,8 @@ export async function recognize(blob) {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
             if (pending && pending.id === id) {
-                pending = null;
+                /* GPU 上卡住时 generate() 永远不返回，只能丢掉 Worker 重来 */
+                resetWorker();
                 reject(new Error('识别超时'));
             }
         }, O.TIMEOUT_MS);

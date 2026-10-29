@@ -155,7 +155,26 @@ async function recognizeFlow() {
     try {
         showStatus(cached ? '正在识别…' : '准备下载模型…', 0);
         const began = performance.now();
-        const tex = await recognize(state.prepared.blob);
+        let tex;
+        try {
+            tex = await recognize(state.prepared.blob);
+        } catch (error) {
+            /* 核显上大图可能把 GPU 缓冲区撑爆：降一档分辨率再试一次 */
+            const longEdge = Math.max(state.prepared.width, state.prepared.height);
+            if (!state.file || longEdge <= CONFIG.OCR.FALLBACK_EDGE) throw error;
+            console.warn('识别失败，降分辨率重试', error);
+            showStatus('这张图太大，换小一点重试…', 0);
+            const smaller = await prepareImage(state.file, CONFIG.OCR.FALLBACK_EDGE);
+            tex = await recognize(smaller.blob);
+            state.prepared = smaller;
+            setPreview({
+                dataUrl: smaller.dataUrl,
+                width: smaller.width,
+                height: smaller.height,
+                bytes: smaller.blob.size,
+                name: state.file.name
+            });
+        }
         const seconds = ((performance.now() - began) / 1000).toFixed(1);
 
         if (!tex || tex.length < 2) {

@@ -20,11 +20,13 @@ export const CONFIG = Object.freeze({
     OCR: Object.freeze({
         MODEL: 'onnx-community/GLM-OCR-ONNX',
         /* 依次尝试：f16 不可用或推理失败就降一档 */
-        DTYPES: Object.freeze(['q4f16', 'q4']),
+        DTYPES: Object.freeze(['q4']),
         PROMPT: 'Text Recognition:',
-        TIMEOUT_MS: 180000,
-        /* 送进模型前的最长边。核显上 1400 会在推理时 GPU 缓冲区分配失败，1200 稳 */
-        MAX_EDGE: 1200,
+        TIMEOUT_MS: 300000,
+        /* 送进模型前的最长边。核显上 1400 会在推理时 GPU 缓冲区分配失败，1000 稳 */
+        MAX_EDGE: 1000,
+        /* 大图识别失败（GPU 缓冲区不够）时自动降到这个尺寸重试 */
+        FALLBACK_EDGE: 800,
         JPEG_QUALITY: 0.9,
         MAX_BYTES: 10 * 1024 * 1024
     }),
@@ -32,7 +34,7 @@ export const CONFIG = Object.freeze({
     /* ---------- KaTeX（本地 vendor，不依赖 CDN） ---------- */
     KATEX: Object.freeze({
         DIR: 'vendor/katex/dist/',
-        LOAD_TIMEOUT_MS: 8000,
+        LOAD_TIMEOUT_MS: 300000,
         DELIMITERS: Object.freeze([
             { open: '$$', close: '$$', display: true },
             { open: '\\[', close: '\\]', display: true },

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>WebGPU 最小算力测试</title></head>
+<body>
+<pre id="out">测试中…</pre>
+<script type="module">
+const out = document.getElementById('out');
+const log = m => { out.textContent += '\n' + m; };
+out.textContent = '开始';
+
+try {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error('没有 adapter');
+    const info = adapter.info || {};
+    log(`adapter: ${info.vendor || '?'} / ${info.architecture || '?'} f16=${adapter.features.has('shader-f16')}`);
+    const device = await adapter.requestDevice();
+    device.lost.then(i => log('DEVICE LOST: ' + i.reason + ' ' + i.message));
+
+    const N = 512;
+    const wgsl = `
+        @group(0) @binding(0) var<storage, read_write> data: array<f32>;
+        @compute @workgroup_size(64)
+        fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+            let i = gid.x;
+            if (i >= ${N}u) { return; }
+            var acc = 0.0;
+            for (var k = 0u; k < 64u; k = k + 1u) {
+                acc = acc + sin(f32(i * 64u + k)) * cos(f32(k));
+            }
+            data[i] = acc;
+        }`;
+    const module = device.createShaderModule({ code: wgsl });
+    const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+    const buffer = device.createBuffer({ size: N * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const readback = device.createBuffer({ size: N * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer } }] });
+
+    const t0 = performance.now();
+    for (let round = 0; round < 200; round++) {
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bind);
+        pass.dispatchWorkgroups(Math.ceil(N / 64));
+        pass.end();
+        enc.copyBufferToBuffer(buffer, 0, readback, 0, N * 4);
+        device.queue.submit([enc.finish()]);
+    }
+    await readback.mapAsync(GPUMapMode.READ);
+    const arr = new Float32Array(readback.getMappedRange().slice(0));
+    readback.unmap();
+    log(`200 轮 compute 完成，用时 ${(performance.now() - t0).toFixed(0)} ms，样本值 ${arr[0].toFixed(4)}`);
+    log('WEBGPU OK');
+} catch (error) {
+    log('FAIL ' + (error.message || error));
+}
+</script>
+</body>
+</html>

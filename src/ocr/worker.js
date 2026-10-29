@@ -15,6 +15,7 @@ import {
     AutoProcessor,
     AutoModelForImageTextToText,
     RawImage,
+    TextStreamer,
     env
 } from '../../vendor/transformers/transformers.web.min.js';
 import { MODEL_SOURCES, applyModelSource } from '../core/modelSource.js';
@@ -151,10 +152,33 @@ async function run({ id, buffer, mime, prompt }) {
     const text = buildInputs(prompt);
 
     const inputs = await processor(text, [image]);
+
+    /* 一边生成一边报进度：核显上一页可能几十秒，界面不该一直停在「识别中」 */
+    let tokens = 0;
+    let streamer = null;
+    try {
+        const tokenizer = processor.tokenizer;
+        if (TextStreamer && tokenizer) {
+            streamer = new TextStreamer(tokenizer, {
+                skip_prompt: true,
+                skip_special_tokens: true,
+                callback_function: () => {
+                    tokens += 1;
+                    if (tokens % 20 === 0) {
+                        self.postMessage({ type: 'status', message: `识别中… 已输出 ${tokens} 个词` });
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        streamer = null;
+    }
+
     const output = await model.generate({
         ...inputs,
         max_new_tokens: 1024,
-        do_sample: false
+        do_sample: false,
+        ...(streamer ? { streamer } : {})
     });
 
     const inputLength = inputs.input_ids.dims[1];

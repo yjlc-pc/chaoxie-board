@@ -61,6 +61,15 @@ await send('DOM.enable');
 await send('Page.enable');
 await sleep(1500);
 
+/* 0. 可选：强制量化档（OCR_DTYPE=q4f16 / q4 / auto 清除记忆） */
+if (process.env.OCR_DTYPE) {
+    const forced = process.env.OCR_DTYPE;
+    await evaluate(forced === 'auto'
+        ? `localStorage.removeItem('cb.ocr.dtype.v1')`
+        : `localStorage.setItem('cb.ocr.dtype.v1', ${JSON.stringify(forced)})`);
+    console.log('量化档:', forced);
+}
+
 /* 1. 塞文件 */
 const doc = await send('DOM.getDocument');
 const node = await send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#file-input' });
