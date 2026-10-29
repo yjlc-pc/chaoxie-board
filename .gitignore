@@ -1,4 +1,10 @@
 node_modules/
-.dom.html
 *.log
 .chrome-profile/
+.chrome-headless/
+testdata/
+.probe*.mjs
+.peek*.mjs
+.watch.mjs
+.tmp-ort*/
+vendor/*.tgz

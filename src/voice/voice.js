@@ -30,6 +30,7 @@ function ensureWorker() {
     worker.postMessage({ type: 'init', base });
     worker.addEventListener('message', event => handleWorker(event.data));
     worker.addEventListener('error', event => {
+        finishPreload(false);
         if (handlers.onError) handlers.onError(`语音模块出错：${event.message || '未知错误'}`);
         setListening(false);
     });
@@ -37,6 +38,27 @@ function ensureWorker() {
 }
 
 let awaiting = null;
+let preloaded = false;
+let preloadResolve = null;
+
+/** 「下载离线包」：把语音模型也拉进缓存，返回 Promise<boolean> */
+export function warmUpVoice() {
+    if (!voiceAvailable()) return Promise.resolve(false);
+    if (preloaded) return Promise.resolve(true);
+    const worker = ensureWorker();
+    return new Promise(resolve => {
+        preloadResolve = resolve;
+        worker.postMessage({ type: 'preload' });
+    });
+}
+
+function finishPreload(ok) {
+    if (ok) preloaded = true;
+    if (preloadResolve) {
+        preloadResolve(ok);
+        preloadResolve = null;
+    }
+}
 
 function handleWorker(data) {
     if (!data) return;
@@ -77,7 +99,13 @@ function handleWorker(data) {
         }
         return;
     }
+    if (data.type === 'preloaded') {
+        finishPreload(true);
+        if (handlers.onState) handlers.onState('idle', '');
+        return;
+    }
     if (data.type === 'error') {
+        finishPreload(false);
         if (handlers.onError) handlers.onError(data.message || '语音处理失败');
     }
 }

@@ -29,6 +29,9 @@ jobs:
           test -f vendor/transformers/transformers.web.min.js || { echo "缺少 vendor/transformers，先本地执行 vendor 步骤"; exit 1; }
           test -f data/strokes.json
 
+      - name: 清理本地残留
+        run: rm -rf .chrome-profile .chrome-headless testdata
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -3,7 +3,7 @@
    权重不在这里管：transformers.js 自己写 Cache Storage。
    ============================================================ */
 
-const VERSION = 'cb-v1';
+const VERSION = 'cb-v2';
 const SHELL = [
     './',
     'index.html',
@@ -35,19 +35,38 @@ const SHELL = [
     'data/strokes.json',
     'pwa/icon.svg',
     'pwa/icon-192.png',
-    'pwa/icon-512.png'
+    'pwa/icon-512.png',
+    /* 运行时 vendor：不预缓存的话，断网后首次用到才去取，会失败 */
+    'vendor/transformers/transformers.web.min.js',
+    'vendor/transformers/ort.webgpu.mjs',
+    'vendor/transformers/ort-wasm-simd-threaded.jsep.wasm',
+    'vendor/transformers/ort-common/index.js',
+    'vendor/katex/dist/katex.min.js',
+    'vendor/katex/dist/katex.min.css'
 ];
 
 self.addEventListener('install', event => {
-    event.waitUntil(
-        caches.open(VERSION).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting())
-    );
+    event.waitUntil((async () => {
+        const cache = await caches.open(VERSION);
+        /* 逐个加：个别文件 404 不该让整个安装失败 */
+        await Promise.all(SHELL.map(async url => {
+            try {
+                await cache.add(new Request(url, { cache: 'reload' }));
+            } catch (error) {
+                console.warn('[sw] 预缓存跳过', url);
+            }
+        }));
+        await self.skipWaiting();
+    })());
 });
 
 self.addEventListener('activate', event => {
     event.waitUntil(
         caches.keys()
-            .then(keys => Promise.all(keys.filter(key => key !== VERSION).map(key => caches.delete(key))))
+            /* 只清自己的外壳缓存：transformers-cache 里是 650MB 权重，绝不能删 */
+            .then(keys => Promise.all(
+                keys.filter(key => key.startsWith('cb-') && key !== VERSION).map(key => caches.delete(key))
+            ))
             .then(() => self.clients.claim())
     );
 });

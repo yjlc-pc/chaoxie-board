@@ -9,7 +9,7 @@ import { initSetup, showScreen, setPreview, setBusy, showStatus, hideStatus, set
 import { initBoard, startBoard, exitBoard, getLineCount, getPublicLines, applyVoiceCommand } from './ui/boardView.js';
 import { initToast, toast } from './ui/toast.js';
 import { recognize, prepareImage, isHeic, warmUp, setHandlers as setOcrHandlers } from './ocr/client.js';
-import { initVoice, voiceAvailable, startListening, stopListening } from './voice/voice.js';
+import { initVoice, voiceAvailable, startListening, stopListening, warmUpVoice } from './voice/voice.js';
 import { describe, EXAMPLES } from './voice/commands.js';
 
 const state = {
@@ -219,8 +219,13 @@ async function downloadOffline() {
     try {
         showStatus('正在下载 OCR 模型…', 0);
         await warmUp();
+        showStatus('正在下载语音模型…', 0);
+        const voiceOk = await warmUpVoice();
         hideStatus();
-        toast('离线包已就绪，断网也能识别', { timeout: 5000 });
+        toast(
+            voiceOk ? '离线包已就绪，断网也能识别和语音改稿' : 'OCR 已离线可用；语音模型没下成，联网后按住说话会自动补下',
+            { timeout: 6000 }
+        );
     } catch (error) {
         hideStatus();
         toast(`离线包下载失败：${error.message || error}`, { timeout: 8000 });

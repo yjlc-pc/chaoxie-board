@@ -13,7 +13,7 @@ let ready = null;
 let handlers = { onProgress: null, onStatus: null };
 
 export function isSupported() {
-    return typeof Worker !== 'undefined' && 'WebGPU' in globalThis || 'gpu' in navigator;
+    return typeof Worker !== 'undefined';
 }
 
 function ensureWorker() {
@@ -41,6 +41,14 @@ function handleMessage(data) {
         return;
     }
     if (data.type === 'ready') {
+        /* 记住真正跑通的档位：下次直接从它开始，不用再等 f16 失败一次 */
+        if (data.dtype) {
+            try {
+                localStorage.setItem(CONFIG.LS.dtype, data.dtype);
+            } catch (error) {
+                /* 隐私模式下写不了就算了 */
+            }
+        }
         return;
     }
     if (data.type === 'result') {
@@ -62,11 +70,25 @@ export function setHandlers(next) {
     handlers = { ...handlers, ...next };
 }
 
+/** 上次跑通的档位排最前，剩下的按配置顺序兜底 */
+function preferredDtypes() {
+    const list = [...O.DTYPES];
+    let saved = null;
+    try {
+        saved = localStorage.getItem(CONFIG.LS.dtype);
+    } catch (error) {
+        saved = null;
+    }
+    if (saved && list.includes(saved)) {
+        return [saved, ...list.filter(dtype => dtype !== saved)];
+    }
+    return list;
+}
+
 export function warmUp() {
     if (ready) return ready;
     const base = new URL('../../', import.meta.url).href;
     ready = new Promise((resolve, reject) => {
-        const queue = [];
         const onMsg = event => {
             const data = event.data || {};
             if (data.type === 'ready') {
@@ -87,10 +109,9 @@ export function warmUp() {
         worker.postMessage({
             type: 'init',
             base,
-            dtypes: [...O.DTYPES],
+            dtypes: preferredDtypes(),
             modelId: O.MODEL
         });
-        void queue;
     });
     return ready;
 }
@@ -147,6 +168,7 @@ function cleanup(text) {
 
 export async function recognize(blob) {
     await warmUp();
+    if (handlers.onStatus) handlers.onStatus({ message: '模型就绪，正在识别…' });
     const buffer = await blob.arrayBuffer();
     const id = `ocr-${++seq}`;
 

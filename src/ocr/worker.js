@@ -24,12 +24,15 @@ let processor = null;
 let readyDtype = null;
 let backend = 'webgpu';
 let initializing = null;
+let modelId = null;
+let baseUrl = '';
+let downgradeTried = false;
 
 function configure(base) {
     env.allowLocalModels = false;
     env.allowRemoteModels = true;
     env.useBrowserCache = true;
-    env.backends.onnx.wasm.wasmPaths = new URL('vendor/transformers/', base).href;
+    /* Worker 里必须单线程：否则 ORT 探测多线程会卡死（要 SharedArrayBuffer） */
     env.backends.onnx.wasm.numThreads = 1;
     /* remoteHost / remotePathTemplate 由 chooseSource 按源设置 */
 }
@@ -64,9 +67,11 @@ function progressCallback(info) {
     }
 }
 
-async function init({ base, dtypes, modelId }) {
+async function init({ base, dtypes, modelId: id }) {
     if (model) return { dtype: readyDtype, backend };
     if (initializing) return initializing;
+    if (id) modelId = id;
+    if (base) baseUrl = base;
 
     initializing = (async () => {
         configure(base);
@@ -97,6 +102,8 @@ async function init({ base, dtypes, modelId }) {
                     model = await AutoModelForImageTextToText.from_pretrained(modelId, {
                         dtype,
                         device: backend,
+                        /* 权重是 .onnx + .onnx_data 拆分格式，必须显式声明才会去挂载 */
+                        use_external_data_format: true,
                         progress_callback: progressCallback
                     });
                     readyDtype = dtype;
@@ -146,7 +153,7 @@ async function run({ id, buffer, mime, prompt }) {
     const inputs = await processor(text, [image]);
     const output = await model.generate({
         ...inputs,
-        max_new_tokens: 3072,
+        max_new_tokens: 1024,
         do_sample: false
     });
 
@@ -158,6 +165,17 @@ async function run({ id, buffer, mime, prompt }) {
     self.postMessage({ type: 'result', id, text: result });
 }
 
+async function releaseModel() {
+    try {
+        if (model && typeof model.dispose === 'function') model.dispose();
+    } catch (error) {
+        /* 释放失败不影响降档重试 */
+    }
+    model = null;
+    processor = null;
+    readyDtype = null;
+}
+
 self.addEventListener('message', async event => {
     const data = event.data || {};
     try {
@@ -166,7 +184,23 @@ self.addEventListener('message', async event => {
             return;
         }
         if (data.type === 'run') {
-            await run(data);
+            try {
+                await run(data);
+            } catch (error) {
+                /* 推理阶段挂掉（常见于 f16 着色器）：降一档 q4 重试一次 */
+                if (!downgradeTried && readyDtype && readyDtype !== 'q4') {
+                    downgradeTried = true;
+                    self.postMessage({
+                        type: 'status',
+                        message: `识别失败（${error.message || error}），换 q4 再试一次…`
+                    });
+                    await releaseModel();
+                    await init({ base: baseUrl, dtypes: ['q4'] });
+                    await run(data);
+                    return;
+                }
+                throw error;
+            }
             return;
         }
     } catch (error) {

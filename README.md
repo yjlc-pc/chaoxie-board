@@ -45,7 +45,7 @@ chaoxie-board/
 │   ├── ocr/                worker（GLM-OCR 推理）/ client（预处理、进度、降档）
 │   ├── board/              Board（唯一计时器）
 │   ├── ui/                 setup / boardView / toast
-│   ├── voice/              语音（第二阶段，当前是骨架）
+│   ├── voice/              语音（Whisper tiny 转写 + 规则槽位/FunctionGemma 解析）
 │   └── main.js             唯一装配入口
 ├── vendor/
 │   ├── transformers/       transformers.js 4.3.1 + ORT WebGPU wasm（本地托管）
@@ -63,7 +63,11 @@ chaoxie-board/
 | 公式 | KaTeX 0.16.47（已 vendor） | 1.5 MB |
 | 字体 | 系统字体（楷体优先），不拉 webfont | 0 |
 
-量化档默认 `q4f16`；如果设备没有 `shader-f16` 或初始化失败，自动降到 `q4` 重试。
+量化档默认 `q4f16`；如果设备没有 `shader-f16`、初始化失败或推理报错，自动降到 `q4` 重试一次。真正跑通的档位会记在 `localStorage`（`cb.ocr.dtype.v1`），下次直接从它开始。
+
+> 实测这台核显（Intel gen-12lp）：`q4f16` **能建会话但一推理就崩**，报 `failed to call OrtRun() ... buffer_manager.cc:643`（GPU 缓冲区分配失败）。所以第一次识别会先失败一次再自动降 `q4`，之后就一直用 `q4`。
+
+送进模型的图片最长边压到 **1400 px**（`CONFIG.OCR.MAX_EDGE`）。核显显存是共享内存，A4 原图直接喂进去会让 GPU 进程 OOM 崩掉（实测 1240×1754 就崩），1400 px 对印刷体识别质量没有可见损失。
 
 ### 权重来源为什么是 ModelScope
 
@@ -75,18 +79,29 @@ chaoxie-board/
 
 `transformers.web.min.js` 原本按打包工具的方式 `import "onnxruntime-web/webgpu"` 和 `"onnxruntime-common"`，浏览器里解析不了。这两处已改成相对路径：
 
-- `onnxruntime-web/webgpu` → `./ort.webgpu.mjs`（ORT 1.31 WebGPU bundle）
+- `onnxruntime-web/webgpu` → `./ort.webgpu.mjs`
 - `onnxruntime-common` → `./ort-common/index.js`（ONNX Runtime 公共 API 的 ESM 构建）
 
-所以本项目零构建、零 CDN 也能跑。升级 transformers.js 时需要重复这两处替换。
+`ort.webgpu.mjs` 里实际放的是 **`ort.webgpu.bundle.min.mjs`**（ORT 的 bundle 构建，自带内联 glue，里面有 `webgpuInit`）。这里踩过三个坑，改配置前先看：
+
+1. **不要**把 `ort-wasm-simd-threaded.jsep.mjs` 放进同一目录。ORT 发现外部 glue 就改用它初始化，而外部 glue 只导出 `jsepInit`，bundle 的 EP 找 `webgpuInit` 就会报 `webgpuInit is not a function`。bundle 是自包含的，**只需要 `ort-wasm-simd-threaded.jsep.wasm`**。
+2. **不要设 `env.backends.onnx.wasm.wasmPaths`**。同目录解析已经正确，设了反而会绕开内联 glue。
+3. **Worker 里必须 `env.backends.onnx.wasm.numThreads = 1`**。否则 ORT 会去探测多线程 wasm（需要 `SharedArrayBuffer`／COOP+COEP），主线程会降级并打警告，Worker 里则**直接卡死且不报错**——这一条排查了很久。
+
+另外 GLM-OCR 三个 ONNX 都是 `.onnx + .onnx_data` 拆分格式，调用 `from_pretrained` 时必须显式传 `use_external_data_format: true`，否则 sidecar 不会被下载/挂载，报 `Module.MountedFiles is not available`。
+
+这些开关在 `src/ocr/worker.js` 和 `src/voice/worker.js` 里都已设好。升级 transformers.js 或 ORT 时需要重做上面几处替换，并重新确认 ORT 构建类型。
 
 ### 开发自检
 
 ```bash
-# 一个带调试端口的浏览器
-chromium --headless=new --remote-debugging-port=9222 --user-data-dir=.chrome-profile about:blank &
+# 一个带调试端口的浏览器（有显示器时才拿得到核显）
+chromium --remote-debugging-port=9222 --user-data-dir=.chrome-profile about:blank &
 node tools/cdp-check.mjs 'http://127.0.0.1:8770/?sample=1'     # 打印 booted/行数/字号/控制台错误
 node tools/cdp-check.mjs 'http://127.0.0.1:8770/tools/modtest.html'  # 验证 vendor 依赖能在 Worker 里解析
+
+# 端到端：选图 → 下载模型 → 识别 → 大屏（会真的下 650MB）
+node tools/e2e-ocr.mjs testdata/page1.png 900
 ```
 
 
@@ -95,7 +110,7 @@ node tools/cdp-check.mjs 'http://127.0.0.1:8770/tools/modtest.html'  # 验证 ve
 - **多栏排版会被按视觉横排拼错顺序**（GLM-OCR 的已知问题），识别结果只能靠重新拍或语音改。
 - **手写体、竖排**识别质量没有保证。
 - 4K 大屏 + 核显上，单页识别在十几秒量级，首次还要加下载时间。
-- 语音（Whisper + 指令解析）尚未接入，`src/voice/voice.js` 目前是接口骨架。
+- 语音识别用 Whisper tiny，指令解析先走规则槽位（`src/voice/commands.js`），规则不中再叫 FunctionGemma 兜底；安静环境识别率明显更好。
 
 ## 部署到 GitHub Pages
 
@@ -118,3 +133,7 @@ node tools/cdp-check.mjs 'http://127.0.0.1:8770/tools/modtest.html'  # 验证 ve
 - [ ] 断网后重新打开，已缓存的模型仍能识别
 - [ ] 底部控制条 5 秒后淡出，触摸后恢复
 - [ ] 装成 PWA 后，系统里双击 `.jpg` 能选「抄写大屏」
+- [ ] 按住右下角「按住说话」说「第三行第三个字改成明」→ 预览正确 → 确认后生效
+- [ ] 说「暂停」「继续」「下一段」「快一点」能立刻响应，不需要确认
+- [ ] 说一句听不懂的话 → 提示 + 示例 + 控件高亮
+- [ ] 断网后按住说话仍能转写（离线包下过语音模型）

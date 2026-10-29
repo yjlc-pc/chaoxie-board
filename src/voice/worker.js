@@ -23,7 +23,7 @@ function configure() {
     env.allowLocalModels = false;
     env.allowRemoteModels = true;
     env.useBrowserCache = true;
-    env.backends.onnx.wasm.wasmPaths = new URL('vendor/transformers/', base).href;
+    /* Worker 里必须单线程：否则 ORT 探测多线程会卡死（要 SharedArrayBuffer） */
     env.backends.onnx.wasm.numThreads = 1;
 }
 
@@ -145,6 +145,23 @@ async function parseCommand({ text, linesHint }) {
     self.postMessage({ type: 'command', command, raw });
 }
 
+/** 「下载离线包」用：把两个模型都过一遍（只下载 + 建会话，解析模型建完即释放显存） */
+async function preload() {
+    const device = 'gpu' in navigator ? 'webgpu' : 'wasm';
+    await loadAsr(device);
+    try {
+        const loaded = await loadParser(device);
+        if (loaded && loaded.model && typeof loaded.model.dispose === 'function') {
+            loaded.model.dispose();
+        }
+        parser = null;
+    } catch (error) {
+        /* 解析模型只是兜底，下不下来都不该拦住离线包 */
+        console.warn('FunctionGemma 预载失败', error);
+    }
+    self.postMessage({ type: 'preloaded' });
+}
+
 self.addEventListener('message', async event => {
     const data = event.data || {};
     if (data.type === 'init') {
@@ -155,6 +172,7 @@ self.addEventListener('message', async event => {
     try {
         if (data.type === 'transcribe') await transcribe(data);
         else if (data.type === 'parse') await parseCommand(data);
+        else if (data.type === 'preload') await preload();
     } catch (error) {
         console.error(error);
         self.postMessage({ type: 'error', message: error.message || String(error) });

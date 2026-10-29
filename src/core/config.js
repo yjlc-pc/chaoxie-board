@@ -8,7 +8,9 @@ export const CONFIG = Object.freeze({
     LS: Object.freeze({
         settings: 'cb.settings.v1',
         doc: 'cb.doc.v1',
-        lastInput: 'cb.last_input.v1'
+        lastInput: 'cb.last_input.v1',
+        /* 上次真正跑通的量化档：q4f16 在部分核显上能加载但不能推理 */
+        dtype: 'cb.ocr.dtype.v1'
     }),
 
     /* ---------- 权重来源：国内直连 HuggingFace 不稳，统一走 mirror ---------- */
@@ -21,8 +23,8 @@ export const CONFIG = Object.freeze({
         DTYPES: Object.freeze(['q4f16', 'q4']),
         PROMPT: 'Text Recognition:',
         TIMEOUT_MS: 180000,
-        /* 送进模型前的最长边；OCR 至少要 200 DPI，A4@200DPI ≈ 1654×2339 */
-        MAX_EDGE: 2400,
+        /* 送进模型前的最长边。核显上 1400 会在推理时 GPU 缓冲区分配失败，1200 稳 */
+        MAX_EDGE: 1200,
         JPEG_QUALITY: 0.9,
         MAX_BYTES: 10 * 1024 * 1024
     }),

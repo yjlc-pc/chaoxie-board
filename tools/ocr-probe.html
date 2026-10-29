@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>OCR 探针</title></head>
+<body>
+<pre id="out">探测中…</pre>
+<script type="module">
+const out = document.getElementById('out');
+const lines = [];
+const worker = new Worker('./ocr-probe-worker.js', { type: 'module' });
+worker.addEventListener('message', event => {
+    lines.push(event.data);
+    out.textContent = lines.join('\n');
+});
+worker.addEventListener('error', event => {
+    lines.push('WORKER-ERROR ' + event.message);
+    out.textContent = lines.join('\n');
+});
+</script>
+</body>
+</html>
