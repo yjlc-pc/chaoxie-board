@@ -9,3 +9,4 @@ testdata/
 .tmp-ort*/
 vendor/*.tgz
 .workbuddy/
+.playwright-cli/

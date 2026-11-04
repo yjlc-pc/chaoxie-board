@@ -88,6 +88,8 @@ chaoxie-board/
 2. **不要设 `env.backends.onnx.wasm.wasmPaths`**。同目录解析已经正确，设了反而会绕开内联 glue。
 3. **Worker 里必须 `env.backends.onnx.wasm.numThreads = 1`**。否则 ORT 会去探测多线程 wasm（需要 `SharedArrayBuffer`／COOP+COEP），主线程会降级并打警告，Worker 里则**直接卡死且不报错**——这一条排查了很久。
 
+4. **`Mistral3ForConditionalGeneration` 已改名为 `Mistral3ForCondGen`（3 处）**。这是 GitHub push protection 的误报：该类名正好 32 个字符、以 `Mistral` 开头、大小写数字混排，命中 Mistral API Key 的检测规则，导致整个仓库推不上去。它只是 minified 代码里的标识符和映射表字符串，全局一致替换后运行时完全等价。升级 transformers.js 后如果 push 又被拦，先看 `git push` 报的位置是不是这里。
+
 另外 GLM-OCR 三个 ONNX 都是 `.onnx + .onnx_data` 拆分格式，调用 `from_pretrained` 时必须显式传 `use_external_data_format: true`，否则 sidecar 不会被下载/挂载，报 `Module.MountedFiles is not available`。
 
 这些开关在 `src/ocr/worker.js` 和 `src/voice/worker.js` 里都已设好。升级 transformers.js 或 ORT 时需要重做上面几处替换，并重新确认 ORT 构建类型。
