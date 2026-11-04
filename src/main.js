@@ -156,24 +156,44 @@ async function recognizeFlow() {
         showStatus(cached ? '正在识别…' : '准备下载模型…', 0);
         const began = performance.now();
         let tex;
+        const longEdge = Math.max(state.prepared.width, state.prepared.height);
+        const canShrink = Boolean(state.file) && longEdge > CONFIG.OCR.FALLBACK_EDGE;
+        let lastError = null;
+
         try {
             tex = await recognize(state.prepared.blob);
         } catch (error) {
-            /* 核显上大图可能把 GPU 缓冲区撑爆：降一档分辨率再试一次 */
-            const longEdge = Math.max(state.prepared.width, state.prepared.height);
-            if (!state.file || longEdge <= CONFIG.OCR.FALLBACK_EDGE) throw error;
-            console.warn('识别失败，降分辨率重试', error);
-            showStatus('这张图太大，换小一点重试…', 0);
-            const smaller = await prepareImage(state.file, CONFIG.OCR.FALLBACK_EDGE);
-            tex = await recognize(smaller.blob);
-            state.prepared = smaller;
-            setPreview({
-                dataUrl: smaller.dataUrl,
-                width: smaller.width,
-                height: smaller.height,
-                bytes: smaller.blob.size,
-                name: state.file.name
-            });
+            lastError = error;
+
+            /* 设备丢了之后 client 已经重建了 worker（= 新 GPUDevice + 换档），
+               先用原尺寸再试一次，能过就不用牺牲清晰度 */
+            if (error.deviceLost) {
+                console.warn('WebGPU 设备丢失，worker 已重建，原尺寸重试', error);
+                showStatus('显卡上下文丢了，已重建，重试一次…', 0);
+                try {
+                    tex = await recognize(state.prepared.blob);
+                } catch (again) {
+                    lastError = again;
+                }
+            }
+
+            /* 还是不行才降分辨率：视觉 token 随边长平方增长，这是最有效的降压手段 */
+            if (!tex && canShrink) {
+                console.warn('识别失败，降分辨率重试', lastError);
+                showStatus('这张图太大，换小一点重试…', 0);
+                const smaller = await prepareImage(state.file, CONFIG.OCR.FALLBACK_EDGE);
+                tex = await recognize(smaller.blob);
+                state.prepared = smaller;
+                setPreview({
+                    dataUrl: smaller.dataUrl,
+                    width: smaller.width,
+                    height: smaller.height,
+                    bytes: smaller.blob.size,
+                    name: state.file.name
+                });
+            } else if (!tex) {
+                throw lastError;
+            }
         }
         const seconds = ((performance.now() - began) / 1000).toFixed(1);
 

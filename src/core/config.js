@@ -19,14 +19,21 @@ export const CONFIG = Object.freeze({
     /* ---------- OCR ---------- */
     OCR: Object.freeze({
         MODEL: 'onnx-community/GLM-OCR-ONNX',
-        /* 依次尝试：f16 不可用或推理失败就降一档 */
-        DTYPES: Object.freeze(['q4']),
+        /* 依次尝试：前面一档建会话失败或推理丢设备，就换下一档。
+           q4f16 最省显存（需 shader-f16），q4 不依赖 f16 且在核显上最稳。
+           q8（_quantized）在 WebGPU 上要展开权重，实际比 q4 更吃显存，只留给 wasm 兜底。 */
+        DTYPES: Object.freeze(['q4f16', 'q4']),
         PROMPT: 'Text Recognition:',
-        TIMEOUT_MS: 300000,
-        /* 送进模型前的最长边。核显上 1400 会在推理时 GPU 缓冲区分配失败，1000 稳 */
-        MAX_EDGE: 1000,
+        /* 一页纸在核显上通常几十秒；再久基本是卡死了，早点重建 worker 比干等更划算 */
+        TIMEOUT_MS: 150000,
+        /* 一页最多生成多少 token。1024 会让 decode 阶段长时间占着 GPU，
+           而且模型不吐 EOS 时会一直跑满，翻倍触发丢设备的概率 */
+        MAX_NEW_TOKENS: 512,
+        /* 送进模型前的最长边。视觉 token ≈ (H/28)×(W/28)，1000 边约 900~1200 个，
+           视觉编码器的注意力是平方级，核显上 896 是能稳住的上限。 */
+        MAX_EDGE: 896,
         /* 大图识别失败（GPU 缓冲区不够）时自动降到这个尺寸重试 */
-        FALLBACK_EDGE: 800,
+        FALLBACK_EDGE: 640,
         JPEG_QUALITY: 0.9,
         MAX_BYTES: 10 * 1024 * 1024
     }),
@@ -34,7 +41,7 @@ export const CONFIG = Object.freeze({
     /* ---------- KaTeX（本地 vendor，不依赖 CDN） ---------- */
     KATEX: Object.freeze({
         DIR: 'vendor/katex/dist/',
-        LOAD_TIMEOUT_MS: 300000,
+        LOAD_TIMEOUT_MS: 8000,
         DELIMITERS: Object.freeze([
             { open: '$$', close: '$$', display: true },
             { open: '\\[', close: '\\]', display: true },

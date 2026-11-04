@@ -19,6 +19,7 @@ import {
     env
 } from '../../vendor/transformers/transformers.web.min.js';
 import { MODEL_SOURCES, applyModelSource } from '../core/modelSource.js';
+import { CONFIG } from '../core/config.js';
 
 let model = null;
 let processor = null;
@@ -27,7 +28,12 @@ let backend = 'webgpu';
 let initializing = null;
 let modelId = null;
 let baseUrl = '';
-let downgradeTried = false;
+/* 推理成功过一次才上报 usable：能建会话 ≠ 能推理，q4f16 就是典型 */
+let usableReported = false;
+/* device lost 是不可逆的，旧 device 上的 session/buffer 全部失效。
+   这里只负责如实上报，重建 worker（= 新 device）由 client 负责。 */
+let lostInfo = null;
+
 
 function configure(base) {
     env.allowLocalModels = false;
@@ -68,11 +74,72 @@ function progressCallback(info) {
     }
 }
 
+/**
+ * 拿到 ORT 正在用的 GPUDevice（worker 内单例），监听它的 lost。
+ * device.lost 只会 settle 一次，而且 reason 只有 'unknown'（驱动/OOM/TDR）
+ * 和 'destroyed'（应用主动销毁）两种，能区分一部分情况。
+ */
+async function watchDevice() {
+    let device = null;
+    try {
+        const webgpu = env.backends && env.backends.onnx && env.backends.onnx.webgpu;
+        if (webgpu && webgpu.device) device = await webgpu.device;
+    } catch (error) {
+        return null;
+    }
+    if (!device || device.__cbWatched) return device;
+    device.__cbWatched = true;
+
+    /* 把真实 limits 打出来：排查时能立刻看出是缓冲区上限还是显存不够 */
+    try {
+        const l = device.limits || {};
+        const mb = value => (typeof value === 'number' ? Math.round(value / 1048576) : '?');
+        console.info(
+            `[ocr] GPU limits: maxBufferSize=${mb(l.maxBufferSize)}MB, ` +
+            `maxStorageBufferBindingSize=${mb(l.maxStorageBufferBindingSize)}MB, ` +
+            `maxComputeWorkgroupStorageSize=${l.maxComputeWorkgroupStorageSize || '?'}B`
+        );
+    } catch (error) {
+        /* limits 读不到不影响推理 */
+    }
+
+    try {
+        if (device.lost && typeof device.lost.then === 'function') {
+            device.lost.then(info => {
+                lostInfo = {
+                    reason: (info && info.reason) || 'unknown',
+                    message: (info && info.message) || ''
+                };
+                console.error('[ocr] WebGPU device lost', lostInfo);
+                self.postMessage({ type: 'deviceLost', ...lostInfo });
+            });
+        }
+    } catch (error) {
+        /* 拿不到 lost 就靠 OrtRun 抛错兜底 */
+    }
+    return device;
+}
+
+function isLostError(error) {
+    const message = String((error && error.message) || error || '');
+    return (
+        /device\]?\s*is\s*lost/i.test(message) ||
+        /mapAsync/i.test(message) ||
+        /buffer_manager\.cc/i.test(message) ||
+        /AbortError/i.test(message)
+    );
+}
+
 async function init({ base, dtypes, modelId: id }) {
     if (model) return { dtype: readyDtype, backend };
     if (initializing) return initializing;
     if (id) modelId = id;
     if (base) baseUrl = base;
+
+    /* device 已经丢了就不要再建 session：同一个 device 上建出来的 session 一推理就炸 */
+    if (lostInfo) {
+        throw new Error(`WebGPU 设备已丢失（${lostInfo.reason}），这台 worker 无法复用`);
+    }
 
     initializing = (async () => {
         configure(base);
@@ -107,12 +174,15 @@ async function init({ base, dtypes, modelId: id }) {
                         use_external_data_format: true,
                         progress_callback: progressCallback
                     });
+                    await watchDevice();
                     readyDtype = dtype;
                     self.postMessage({ type: 'ready', dtype, backend, source: source.id });
                     return { dtype, backend, source: source.id };
                 } catch (error) {
                     lastError = error;
                     console.warn(`${source.id} / ${dtype} 初始化失败`, error);
+                    /* 设备都丢了，换 dtype 只是把同样的失败重演一遍 */
+                    if (lostInfo) throw error;
                     self.postMessage({
                         type: 'status',
                         message: `${source.label} 的 ${dtype} 不可用（${error.message || error}），换下一个…`,
@@ -176,7 +246,7 @@ async function run({ id, buffer, mime, prompt }) {
 
     const output = await model.generate({
         ...inputs,
-        max_new_tokens: 1024,
+        max_new_tokens: CONFIG.OCR.MAX_NEW_TOKENS,
         do_sample: false,
         ...(streamer ? { streamer } : {})
     });
@@ -186,18 +256,14 @@ async function run({ id, buffer, mime, prompt }) {
         skip_special_tokens: true
     });
     const result = (decoded && decoded[0] ? decoded[0] : '').trim();
-    self.postMessage({ type: 'result', id, text: result });
-}
 
-async function releaseModel() {
-    try {
-        if (model && typeof model.dispose === 'function') model.dispose();
-    } catch (error) {
-        /* 释放失败不影响降档重试 */
+    /* 到这里才算真正跑通这一档，之前 ready 只代表会话建起来了 */
+    if (!usableReported) {
+        usableReported = true;
+        self.postMessage({ type: 'usable', dtype: readyDtype, backend });
     }
-    model = null;
-    processor = null;
-    readyDtype = null;
+
+    self.postMessage({ type: 'result', id, text: result });
 }
 
 self.addEventListener('message', async event => {
@@ -208,27 +274,21 @@ self.addEventListener('message', async event => {
             return;
         }
         if (data.type === 'run') {
-            try {
-                await run(data);
-            } catch (error) {
-                /* 推理阶段挂掉（常见于 f16 着色器）：降一档 q4 重试一次 */
-                if (!downgradeTried && readyDtype && readyDtype !== 'q4') {
-                    downgradeTried = true;
-                    self.postMessage({
-                        type: 'status',
-                        message: `识别失败（${error.message || error}），换 q4 再试一次…`
-                    });
-                    await releaseModel();
-                    await init({ base: baseUrl, dtypes: ['q4'] });
-                    await run(data);
-                    return;
-                }
-                throw error;
-            }
+            await run(data);
             return;
         }
     } catch (error) {
         console.error(error);
-        self.postMessage({ type: 'error', id: data.id, message: error.message || String(error) });
+        /* 把「设备丢了」和「图太大/识别失败」分开上报：
+           前者必须换 worker（= 新 GPUDevice），后者换个尺寸重试就行 */
+        const deviceLost = Boolean(lostInfo) || isLostError(error);
+        self.postMessage({
+            type: 'error',
+            id: data.id,
+            message: error.message || String(error),
+            deviceLost,
+            dtype: readyDtype
+        });
     }
 });
+

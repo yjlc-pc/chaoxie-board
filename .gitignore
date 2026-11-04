@@ -8,3 +8,4 @@ testdata/
 .watch.mjs
 .tmp-ort*/
 vendor/*.tgz
+.workbuddy/

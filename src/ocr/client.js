@@ -10,6 +10,10 @@ const O = CONFIG.OCR;
 let worker = null;
 let seq = 0;
 let ready = null;
+/* 当前 worker 实际用上的档位：worker 重建后要重新等 ready，这里同步记一份 */
+let readyInfo = null;
+/* 已经让这台机器丢过设备（或建不起会话）的档位，下次直接跳过 */
+const failedDtypes = new Set();
 let handlers = { onProgress: null, onStatus: null };
 
 export function isSupported() {
@@ -30,7 +34,7 @@ function ensureWorker() {
 }
 
 /** 丢掉这个 Worker（卡死或崩掉时）：下次识别会重建，GPU 上下文也跟着释放 */
-function resetWorker() {
+function resetWorker(notifyWarmUp = true) {
     if (worker) {
         try {
             worker.terminate();
@@ -40,10 +44,25 @@ function resetWorker() {
     }
     worker = null;
     ready = null;
+    readyInfo = null;
     pending = null;
+    /* 初始化阶段就丢设备时，warmUp 的 Promise 否则会永远挂着。
+       message 事件的 error 分支会自己 reject，所以那里传 false，
+       免得被这里的兜底文案盖掉真实原因。 */
+    if (notifyWarmUp) failWarmUp();
 }
 
 let pending = null;
+let readyReject = null;
+
+function failWarmUp(message = '模型加载中断，请重试') {
+    if (readyReject) {
+        const reject = readyReject;
+        readyReject = null;
+        reject(new Error(message));
+    }
+    ready = null;
+}
 
 function handleMessage(data) {
     if (!data) return;
@@ -56,13 +75,33 @@ function handleMessage(data) {
         return;
     }
     if (data.type === 'ready') {
-        /* 记住真正跑通的档位：下次直接从它开始，不用再等 f16 失败一次 */
-        if (data.dtype) {
-            try {
-                localStorage.setItem(CONFIG.LS.dtype, data.dtype);
-            } catch (error) {
-                /* 隐私模式下写不了就算了 */
-            }
+        /* 只是会话建起来了，还不能说明能推理——真正的「可用档位」等 usable */
+        readyInfo = { dtype: data.dtype, backend: data.backend, source: data.source };
+        return;
+    }
+    if (data.type === 'usable') {
+        /* 推理成功过一次，这一档才算真跑通，记住它下次优先用 */
+        failedDtypes.delete(data.dtype);
+        try {
+            localStorage.setItem(CONFIG.LS.dtype, data.dtype);
+        } catch (error) {
+            /* 隐私模式下写不了就算了 */
+        }
+        return;
+    }
+    if (data.type === 'deviceLost') {
+        /* 设备丢了：这个 worker 里所有 buffer 都失效，留着只会让后续每次识别都失败 */
+        const dtype = readyInfo && readyInfo.dtype;
+        if (dtype) failedDtypes.add(dtype);
+        const current = pending;
+        resetWorker();
+        if (handlers.onStatus) {
+            handlers.onStatus({ message: '显卡上下文丢了，正在重建…' });
+        }
+        if (current) {
+            const error = new Error(`WebGPU 设备丢失（${data.reason || 'unknown'}）`);
+            error.deviceLost = true;
+            current.reject(error);
         }
         return;
     }
@@ -74,10 +113,15 @@ function handleMessage(data) {
         return;
     }
     if (data.type === 'error') {
+        if (data.deviceLost && data.dtype) failedDtypes.add(data.dtype);
         const current = pending;
+        /* 不管是推理失败还是初始化失败，这个 worker 都不再可信，直接扔。
+           初始化阶段由 warmUp 自己的监听器 reject，这里不覆盖它的原因。 */
+        resetWorker(false);
         if (current && (!data.id || current.id === data.id)) {
-            resetWorker();
-            current.reject(new Error(data.message));
+            const error = new Error(data.message);
+            error.deviceLost = Boolean(data.deviceLost);
+            current.reject(error);
         }
     }
 }
@@ -101,18 +145,35 @@ function preferredDtypes() {
     return list;
 }
 
+/**
+ * 剔除这台机器上已经失败过的档位。
+ * 全失败过一轮就清空重来——之前的失败可能只是当时显存压力大，不是这一档本身不行。
+ */
+function usableDtypes() {
+    const all = preferredDtypes();
+    const left = all.filter(dtype => !failedDtypes.has(dtype));
+    if (left.length) return left;
+    failedDtypes.clear();
+    return all;
+}
+
 export function warmUp() {
     if (ready) return ready;
     const base = new URL('../../', import.meta.url).href;
     ready = new Promise((resolve, reject) => {
+        /* 用局部引用：初始化失败时 worker 会被置空，这里再去 removeEventListener 会炸 */
+        const own = ensureWorker();
         const onMsg = event => {
             const data = event.data || {};
             if (data.type === 'ready') {
-                worker.removeEventListener('message', onMsg);
+                own.removeEventListener('message', onMsg);
+                readyReject = null;
                 resolve(data);
             } else if (data.type === 'error') {
-                worker.removeEventListener('message', onMsg);
-                ready = null;
+                own.removeEventListener('message', onMsg);
+                /* 自己 reject，不让 resetWorker 用「加载中断」顶掉真实原因 */
+                readyReject = null;
+                resetWorker();
                 reject(new Error(data.message || '初始化失败'));
             } else if (data.type === 'progress' && handlers.onProgress) {
                 handlers.onProgress(data);
@@ -120,12 +181,12 @@ export function warmUp() {
                 handlers.onStatus(data);
             }
         };
-        worker = ensureWorker();
-        worker.addEventListener('message', onMsg);
-        worker.postMessage({
+        readyReject = reject;
+        own.addEventListener('message', onMsg);
+        own.postMessage({
             type: 'init',
             base,
-            dtypes: preferredDtypes(),
+            dtypes: usableDtypes(),
             modelId: O.MODEL
         });
     });
@@ -184,6 +245,7 @@ function cleanup(text) {
 
 export async function recognize(blob) {
     await warmUp();
+    if (!worker) throw new Error('OCR worker 已重建，请重试');
     if (handlers.onStatus) handlers.onStatus({ message: '模型就绪，正在识别…' });
     const buffer = await blob.arrayBuffer();
     const id = `ocr-${++seq}`;
